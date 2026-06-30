@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>تأثير الجزيئات التفاعلي</title>
+<style>
+  :root{
+    --bg:#0a0612;
+    --bg2:#160a26;
+    --pink:#ff2d78;
+    --violet:#7b2ff7;
+    --gold:#ffd166;
+    --ink:#f5e9ff;
+    --muted:#9d8bb8;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:'Segoe UI',Tahoma,Arial,sans-serif;}
+  body{
+    background: radial-gradient(ellipse at 50% 32%, #1a0608 0%, #0a0408 60%, #060305 100%);
+  }
+  canvas{display:block;position:fixed;inset:0;touch-action:none;}
+
+  .brand{
+    position:fixed;
+    top:5.5%;
+    left:50%;
+    transform:translateX(-50%);
+    color:var(--muted);
+    font-size:11px;
+    letter-spacing:4px;
+    text-transform:uppercase;
+    opacity:.55;
+    z-index:10;
+    pointer-events:none;
+  }
+
+  .ui{
+    position:fixed;
+    left:50%;
+    bottom:7%;
+    transform:translateX(-50%);
+    width:min(86vw,420px);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+    z-index:10;
+  }
+  .field{width:100%;}
+  input{
+    width:100%;
+    padding:15px 22px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.14);
+    background:rgba(255,255,255,0.05);
+    backdrop-filter:blur(14px);
+    -webkit-backdrop-filter:blur(14px);
+    color:var(--ink);
+    font-size:16px;
+    text-align:center;
+    outline:none;
+    transition:border-color .35s ease, box-shadow .35s ease, background .35s ease;
+    letter-spacing:.5px;
+  }
+  input::placeholder{color:var(--muted);}
+  input:focus{
+    border-color:rgba(255,70,70,0.55);
+    background:rgba(255,255,255,0.08);
+    box-shadow:0 0 0 4px rgba(255,40,55,0.14), 0 0 28px rgba(255,40,55,0.28);
+  }
+  .hint{
+    color:var(--muted);
+    font-size:12.5px;
+    letter-spacing:.3px;
+    text-align:center;
+    opacity:.8;
+  }
+</style>
+</head>
+<body>
+  <div class="brand">Particle Reveal</div>
+  <canvas id="c"></canvas>
+  <div class="ui">
+    <div class="field">
+      <input id="txt" type="text" placeholder="اكتب أي كلمة هون…" maxlength="18" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="hint">حرّك إصبعك أو الفأرة فوق الشكل — واكتب لتشوفه يتحول لكلمة</div>
+  </div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const input = document.getElementById('txt');
+  let W, H, DPR;
+
+  function resize(){
+    // جودة أعلى للعرض، عدد الجزيئات يضل ثابت زي ما هو
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  resize();
+
+  // ---------- pointer ----------
+  const pointer = { x: -9999, y: -9999 };
+  function setPointer(x, y){ pointer.x = x; pointer.y = y; }
+  window.addEventListener('mousemove', e => setPointer(e.clientX, e.clientY));
+  window.addEventListener('mouseleave', () => { pointer.x = -9999; pointer.y = -9999; });
+  canvas.addEventListener('touchmove', e => {
+    if (e.touches[0]) setPointer(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  canvas.addEventListener('touchend', () => { pointer.x = -9999; pointer.y = -9999; });
+
+  // ---------- offscreen sampling ----------
+  const off = document.createElement('canvas');
+  const offCtx = off.getContext('2d', { willReadFrequently: true });
+
+  function samplePoints(count, offsetX, offsetY){
+    const w = off.width, h = off.height;
+    const data = offCtx.getImageData(0, 0, w, h).data;
+    const candidates = [];
+    const step = 2;
+    for (let y = 0; y < h; y += step){
+      for (let x = 0; x < w; x += step){
+        if (data[(y * w + x) * 4 + 3] > 128) candidates.push({ x: x + offsetX, y: y + offsetY });
+      }
+    }
+    for (let i = candidates.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    const pts = [];
+    if (!candidates.length) return pts;
+    for (let i = 0; i < count; i++) pts.push(candidates[i % candidates.length]);
+    return pts;
+  }
+
+  function heartPoints(count, cx, cy, scale){
+    const size = Math.max(300, scale * 2.3);
+    off.width = size; off.height = size;
+    offCtx.clearRect(0, 0, size, size);
+    offCtx.fillStyle = '#fff';
+    offCtx.save();
+    offCtx.translate(size / 2, size / 2);
+    const s = scale / 16;
+    offCtx.beginPath();
+    for (let t = 0; t <= Math.PI * 2; t += 0.01){
+      const x = 16 * Math.pow(Math.sin(t), 3);
+      const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+      const px = x * s, py = y * s;
+      if (t === 0) offCtx.moveTo(px, py); else offCtx.lineTo(px, py);
+    }
+    offCtx.closePath();
+    offCtx.fill();
+    offCtx.restore();
+    return samplePoints(count, cx - size / 2, cy - size / 2);
+  }
+
+  function textPoints(count, text, cx, cy, maxWidth){
+    const w = Math.max(window.innerWidth, 800);
+    const h = 420;
+    off.width = w; off.height = h;
+    offCtx.clearRect(0, 0, w, h);
+    offCtx.fillStyle = '#fff';
+    let fontSize = 170;
+    offCtx.font = `900 ${fontSize}px 'Segoe UI', Tahoma, Arial, sans-serif`;
+    let measured = offCtx.measureText(text).width || 1;
+    fontSize = Math.max(34, Math.min(230, fontSize * (maxWidth / measured)));
+    offCtx.font = `900 ${fontSize}px 'Segoe UI', Tahoma, Arial, sans-serif`;
+    offCtx.textBaseline = 'middle';
+    offCtx.textAlign = 'center';
+    offCtx.fillText(text, w / 2, h / 2);
+    return samplePoints(count, cx - w / 2, cy - h / 2);
+  }
+
+  function currentTargets(){
+    const cx = W / 2, cy = H * 0.32;
+    const text = input.value.trim();
+    if (!text.length){
+      const scale = Math.min(W, H) * 0.34;
+      return heartPoints(COUNT, cx, cy, scale);
+    }
+    const maxWidth = Math.min(W * 0.86, 900);
+    return textPoints(COUNT, text, cx, cy, maxWidth);
+  }
+
+  // ---------- particles ----------
+  // عدد ثابت لكل الأجهزة (موبايل ضعيف أو قوي، نفس العدد بالظبط)
+  const COUNT = 4500;
+  const TAU = Math.PI * 2;
+  const RED = 'rgba(225,28,40,0.92)';
+  const SPARK_COLOR = '255,90,60';
+
+  // مصفوفات أرقام (typed arrays) بدل مصفوفة كائنات — أخف بكثير على المعالج والذاكرة
+  const px = new Float32Array(COUNT);
+  const py = new Float32Array(COUNT);
+  const pvx = new Float32Array(COUNT);
+  const pvy = new Float32Array(COUNT);
+  const ptx = new Float32Array(COUNT);
+  const pty = new Float32Array(COUNT);
+  const psize = new Float32Array(COUNT);
+  let started = false;
+
+  function initParticles(targets){
+    for (let i = 0; i < COUNT; i++){
+      const t = targets[i % targets.length];
+      px[i] = t.x + (Math.random() - 0.5) * 420;
+      py[i] = t.y + (Math.random() - 0.5) * 420;
+      ptx[i] = t.x; pty[i] = t.y;
+      pvx[i] = 0; pvy[i] = 0;
+      psize[i] = Math.random() * 0.8 + 0.45;
+    }
+  }
+
+  function retarget(targets){
+    for (let i = 0; i < COUNT; i++){
+      const t = targets[i % targets.length];
+      ptx[i] = t.x;
+      pty[i] = t.y;
+    }
+  }
+
+  function refresh(){
+    const targets = currentTargets();
+    if (!started){ initParticles(targets); started = true; }
+    else retarget(targets);
+  }
+  refresh();
+
+  let debounce;
+  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(refresh, 60); });
+  window.addEventListener('resize', () => { resize(); clearTimeout(debounce); debounce = setTimeout(refresh, 150); });
+
+  // ---------- sparks (قليلة العدد، تُرسم بشكل منفصل) ----------
+  const MAX_SPARKS = 120;
+  const sx = new Float32Array(MAX_SPARKS);
+  const sy = new Float32Array(MAX_SPARKS);
+  const svx = new Float32Array(MAX_SPARKS);
+  const svy = new Float32Array(MAX_SPARKS);
+  const slife = new Float32Array(MAX_SPARKS);
+  let sparkCount = 0;
+
+  function spawnSpark(x, y){
+    if (sparkCount >= MAX_SPARKS) return;
+    const i = sparkCount++;
+    sx[i] = x; sy[i] = y;
+    svx[i] = (Math.random() - 0.5) * 2.2;
+    svy[i] = (Math.random() - 0.5) * 2.2 - 0.6;
+    slife[i] = 1;
+  }
+
+  // ---------- animation ----------
+  const REPEL_RADIUS = 90;
+  const REPEL_RADIUS2 = REPEL_RADIUS * REPEL_RADIUS;
+  const REPEL_FORCE = 6.4;
+  const SPRING = 0.06;
+  const FRICTION = 0.86;
+  let time = 0;
+
+  function tick(){
+    time += 0.016;
+    ctx.fillStyle = 'rgba(10,6,18,0.24)';
+    ctx.fillRect(0, 0, W, H);
+
+    // تحديث الفيزياء + رسم كل الجزيئات بطبقتين فقط (توهج + قلب مضيء) — نداءا تلوين اثنين بس مهما كان العدد
+    let glowPath = new Path2D();
+    let corePath = new Path2D();
+    for (let i = 0; i < COUNT; i++){
+      const dx = px[i] - pointer.x, dy = py[i] - pointer.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < REPEL_RADIUS2){
+        const dist = Math.sqrt(dist2) || 1;
+        const force = (1 - dist / REPEL_RADIUS) * REPEL_FORCE;
+        pvx[i] += (dx / dist) * force;
+        pvy[i] += (dy / dist) * force;
+        if (Math.random() < 0.03) spawnSpark(px[i], py[i]);
+      }
+      pvx[i] += Math.sin(time + i * 0.10) * 0.018;
+      pvy[i] += Math.cos(time + i * 0.13) * 0.018;
+      pvx[i] += (ptx[i] - px[i]) * SPRING;
+      pvy[i] += (pty[i] - py[i]) * SPRING;
+      pvx[i] *= FRICTION;
+      pvy[i] *= FRICTION;
+      px[i] += pvx[i];
+      py[i] += pvy[i];
+
+      const s = psize[i];
+      glowPath.moveTo(px[i] + s * 2.6, py[i]);
+      glowPath.arc(px[i], py[i], s * 2.6, 0, TAU);
+      corePath.moveTo(px[i] + s, py[i]);
+      corePath.arc(px[i], py[i], s, 0, TAU);
+    }
+    ctx.fillStyle = 'rgba(255,40,55,0.10)';
+    ctx.fill(glowPath);
+    ctx.fillStyle = 'rgba(255,92,92,0.95)';
+    ctx.fill(corePath);
+
+    // الشرر (عدد قليل، رسم مبسط)
+    for (let i = sparkCount - 1; i >= 0; i--){
+      sx[i] += svx[i]; sy[i] += svy[i]; svy[i] += 0.03; slife[i] -= 0.03;
+      if (slife[i] <= 0){
+        sx[i] = sx[sparkCount - 1]; sy[i] = sy[sparkCount - 1];
+        svx[i] = svx[sparkCount - 1]; svy[i] = svy[sparkCount - 1];
+        slife[i] = slife[sparkCount - 1];
+        sparkCount--;
+        continue;
+      }
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${SPARK_COLOR},${slife[i]})`;
+      ctx.rect(sx[i] - 1.4, sy[i] - 1.4, 2.8, 2.8);
+      ctx.fill();
+    }
+
+    requestAnimationFrame(tick);
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
